@@ -27,9 +27,8 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 # D change an environment variable for SECRET_KEY in production
 SECRET_KEY = env("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
-# DEBUG = env("DEBUG")
-DEBUG = True
-# ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
+DEBUG = env("DEBUG")
+ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 # Database configuration based on USE_POSTGRES environment variable
 USE_POSTGRES = env.bool("USE_POSTGRES", default=False)
 DATABASES = {
