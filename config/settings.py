@@ -27,8 +27,9 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 # D change an environment variable for SECRET_KEY in production
 SECRET_KEY = env("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env("DEBUG")
-ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
+# DEBUG = env("DEBUG")
+DEBUG = True
+# ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 # Database configuration based on USE_POSTGRES environment variable
 USE_POSTGRES = env.bool("USE_POSTGRES", default=False)
 DATABASES = {
@@ -69,6 +70,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework_simplejwt.token_blacklist",  # JWT token blacklist
     "tickets", #B 
     "accounts", #A 
     "kb", #C
@@ -164,6 +166,27 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# ===== Custom User Model =====
+AUTH_USER_MODEL = 'accounts.User'
+
+# ===== JWT Configuration =====
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+}
+
+# ===== Google OAuth & Admin Configuration =====
+GOOGLE_OAUTH_CLIENT_ID = env('GOOGLE_OAUTH_CLIENT_ID', default='')
+ADMIN_EMAILS = env('ADMIN_EMAILS', default='')
+
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": (
         "config.renderers.ApiJSONRenderer",
@@ -174,7 +197,10 @@ REST_FRAMEWORK = {
         "djangorestframework_camel_case.parser.CamelCaseFormParser",
         "djangorestframework_camel_case.parser.CamelCaseMultiPartParser",
     ),
-    "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "EXCEPTION_HANDLER": "accounts.exceptions.custom_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 } 
 #CORS_SETTINGS ADD BY D 
