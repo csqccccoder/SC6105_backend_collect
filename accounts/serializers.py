@@ -173,3 +173,38 @@ class AuditLogSerializer(serializers.ModelSerializer):
         model = AuditLog
         fields = ['id', 'userId', 'userEmail', 'action', 'details', 'ipAddress', 'timestamp']
         read_only_fields = fields
+
+
+# ========== Auth API Serializers ==========
+
+class RoleItemSerializer(serializers.Serializer):
+    """Role item serializer for role list response"""
+    value = serializers.CharField()
+    label = serializers.CharField()
+
+
+class LoginRequestSerializer(serializers.Serializer):
+    """Login request serializer"""
+    sso_token = serializers.CharField(help_text="Google SSO token")
+
+
+class LoginResponseDataSerializer(serializers.Serializer):
+    """Login response data serializer"""
+    token = serializers.CharField(help_text="JWT access token")
+    user = CurrentUserSerializer()
+
+
+class LogoutRequestSerializer(serializers.Serializer):
+    """Logout request serializer"""
+    refresh_token = serializers.CharField(required=False, allow_null=True, allow_blank=True, 
+                                         help_text="Refresh token to blacklist (optional)")
+
+
+class RefreshTokenRequestSerializer(serializers.Serializer):
+    """Refresh token request serializer"""
+    refresh_token = serializers.CharField(help_text="Refresh token")
+
+
+class ChangeRoleRequestSerializer(serializers.Serializer):
+    """Change role request serializer"""
+    role = serializers.ChoiceField(choices=User.Role.choices)

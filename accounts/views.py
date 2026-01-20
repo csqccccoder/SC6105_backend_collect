@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from google.oauth2 import id_token
 from google.auth.transport import requests
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 from .models import User, Team, TeamMembership, AuditLog
 from .permissions import IsAdmin, IsStaffMember
@@ -21,6 +22,12 @@ from .serializers import (
     TeamUpdateSerializer,
     AddTeamMemberSerializer,
     AuditLogSerializer,
+    RoleItemSerializer,
+    LoginRequestSerializer,
+    LoginResponseDataSerializer,
+    LogoutRequestSerializer,
+    RefreshTokenRequestSerializer,
+    ChangeRoleRequestSerializer,
 )
 from .response_wrapper import APIResponse, success_response, error_response
 from .pagination import CustomPagination
@@ -157,6 +164,12 @@ class UserViewSet(viewsets.ModelViewSet):
             code=200
         )
     
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(response=CurrentUserSerializer)
+        },
+        tags=["Users"]
+    )
     @action(detail=False, methods=['get'], url_path='me')
     def current_user(self, request):
         """
@@ -166,6 +179,15 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = CurrentUserSerializer(request.user)
         return success_response(serializer.data)
     
+    @extend_schema(
+        request=ChangeRoleRequestSerializer,
+        responses={
+            200: OpenApiResponse(response=UserSerializer),
+            400: OpenApiResponse(),
+            403: OpenApiResponse()
+        },
+        tags=["Users"]
+    )
     @action(detail=True, methods=['post'], url_path='change-role', permission_classes=[IsAdmin])
     def change_role(self, request, pk=None):
         """
@@ -189,6 +211,14 @@ class UserViewSet(viewsets.ModelViewSet):
         serializer = UserSerializer(user)
         return success_response(serializer.data, message='Role changed successfully')
     
+    @extend_schema(
+        request=None,
+        responses={
+            200: OpenApiResponse(response=UserSerializer),
+            403: OpenApiResponse()
+        },
+        tags=["Users"]
+    )
     @action(detail=True, methods=['post'], url_path='toggle-active', permission_classes=[IsAdmin])
     def toggle_active(self, request, pk=None):
         """
@@ -217,6 +247,14 @@ class RoleView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(
+                response=RoleItemSerializer(many=True)
+            )
+        },
+        tags=["Roles"]
+    )
     def get(self, request):
         roles = [
             {"value": choice[0], "label": choice[1]}
@@ -233,6 +271,17 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
     google_request = requests.Request()
     
+    @extend_schema(
+        request=LoginRequestSerializer,
+        responses={
+            200: OpenApiResponse(response=LoginResponseDataSerializer),
+            400: OpenApiResponse(),
+            401: OpenApiResponse(),
+            403: OpenApiResponse(),
+            500: OpenApiResponse()
+        },
+        tags=["Authentication"]
+    )
     def post(self, request):
         ssoToken = request.data.get('sso_token')
         if not ssoToken:
@@ -310,6 +359,13 @@ class LogoutView(APIView):
     """
     permission_classes = [IsAuthenticated]
     
+    @extend_schema(
+        request=LogoutRequestSerializer,
+        responses={
+            200: OpenApiResponse()
+        },
+        tags=["Authentication"]
+    )
     def post(self, request):
         try:
             from rest_framework_simplejwt.tokens import RefreshToken
@@ -338,6 +394,7 @@ class RefreshTokenView(APIView):
     """
     permission_classes = [AllowAny]
     
+    @extend_schema(exclude=True)
     def post(self, request):
         # TODO: 实现token刷新逻辑
         # 可使用 simplejwt 的 TokenRefreshView
@@ -355,6 +412,13 @@ class CurrentUserView(APIView):
     """
     permission_classes = [IsAuthenticated]
     
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(response=CurrentUserSerializer),
+            401: OpenApiResponse()
+        },
+        tags=["Authentication"]
+    )
     def get(self, request):
         serializer = CurrentUserSerializer(request.user)
         return success_response(serializer.data)
@@ -441,6 +505,15 @@ class TeamViewSet(viewsets.ModelViewSet):
             code=200
         )
     
+    @extend_schema(
+        request=AddTeamMemberSerializer,
+        responses={
+            200: OpenApiResponse(response=TeamSerializer),
+            400: OpenApiResponse(),
+            404: OpenApiResponse()
+        },
+        tags=["Teams"]
+    )
     @action(detail=True, methods=['post'], url_path='members')
     def add_member(self, request, pk=None):
         """
@@ -478,6 +551,14 @@ class TeamViewSet(viewsets.ModelViewSet):
             message='Member added successfully'
         )
     
+    @extend_schema(
+        request=None,
+        responses={
+            200: OpenApiResponse(response=TeamSerializer),
+            404: OpenApiResponse()
+        },
+        tags=["Teams"]
+    )
     @action(detail=True, methods=['delete'], url_path='members/(?P<user_id>[^/.]+)')
     def remove_member(self, request, pk=None, user_id=None):
         """
