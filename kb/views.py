@@ -7,20 +7,33 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 from django.utils import timezone
 from django.core.paginator import Paginator
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 from .models import KnowledgeArticle, Tag
 from .serializers import (
     KnowledgeArticleSerializer,
     KnowledgeArticleListSerializer,
-    FeedbackSerializer
+    FeedbackSerializer,
+    PaginatedKnowledgeArticleListResponseSerializer,
+    MessageResponseSerializer,
+    DeleteResponseSerializer
 )
 
 
 def is_staff_user(user):
-    """Check if user is staff/manager/admin"""
-    # Try to use role field first, fallback to is_staff/is_superuser
-    if hasattr(user, 'role'):
-        return user.role in ['staff', 'manager', 'admin']
+    """
+    Check if user is staff/manager/admin
+    SSO-compatible: Prioritizes 'role' field from SSO system
+    Fallback: Django's built-in is_staff/is_superuser
+    """
+    # 1. Priority check: SSO synced role field
+    if hasattr(user, 'role') and user.role:
+        # Ensure role is string and in allowed roles list
+        if isinstance(user.role, str) and user.role.lower() in ['staff', 'manager', 'admin']:
+            return True
+    
+    # 2. Fallback to Django built-in permission fields
     return user.is_staff or user.is_superuser
 
 
@@ -39,6 +52,68 @@ def get_visible_articles_queryset(user):
         )
 
 
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[
+            OpenApiParameter(name='keyword', type=OpenApiTypes.STR, required=False, description='Search keyword'),
+            OpenApiParameter(name='query', type=OpenApiTypes.STR, required=False, description='Search query'),
+            OpenApiParameter(name='category', type=OpenApiTypes.STR, required=False, description='Filter by category'),
+            OpenApiParameter(name='tag', type=OpenApiTypes.STR, required=False, description='Filter by tag'),
+            OpenApiParameter(name='status', type=OpenApiTypes.STR, required=False, description='Filter by status'),
+            OpenApiParameter(name='page', type=OpenApiTypes.INT, required=False, description='Page number'),
+            OpenApiParameter(name='pageSize', type=OpenApiTypes.INT, required=False, description='Page size'),
+        ],
+        responses={200: PaginatedKnowledgeArticleListResponseSerializer},
+        operation_id='kb_articles_list',
+        summary='List knowledge base articles'
+    ),
+    list_all=extend_schema(
+        parameters=[
+            OpenApiParameter(name='keyword', type=OpenApiTypes.STR, required=False, description='Search keyword'),
+            OpenApiParameter(name='query', type=OpenApiTypes.STR, required=False, description='Search query'),
+            OpenApiParameter(name='category', type=OpenApiTypes.STR, required=False, description='Filter by category'),
+            OpenApiParameter(name='tag', type=OpenApiTypes.STR, required=False, description='Filter by tag'),
+            OpenApiParameter(name='status', type=OpenApiTypes.STR, required=False, description='Filter by status'),
+            OpenApiParameter(name='page', type=OpenApiTypes.INT, required=False, description='Page number'),
+            OpenApiParameter(name='pageSize', type=OpenApiTypes.INT, required=False, description='Page size'),
+        ],
+        responses={200: PaginatedKnowledgeArticleListResponseSerializer},
+        operation_id='kb_articles_list_all',
+        summary='List all articles (staff only)'
+    ),
+    retrieve=extend_schema(
+        responses={200: KnowledgeArticleSerializer},
+        operation_id='kb_articles_retrieve',
+        summary='Retrieve article details'
+    ),
+    create=extend_schema(
+        request=KnowledgeArticleSerializer,
+        responses={201: KnowledgeArticleSerializer},
+        operation_id='kb_articles_create',
+        summary='Create article (staff only)'
+    ),
+    update=extend_schema(
+        request=KnowledgeArticleSerializer,
+        responses={200: KnowledgeArticleSerializer},
+        operation_id='kb_articles_update',
+        summary='Update article (staff only)'
+    ),
+    destroy=extend_schema(
+        responses={200: DeleteResponseSerializer},
+        operation_id='kb_articles_destroy',
+        summary='Delete article (staff only)'
+    ),
+    publish=extend_schema(
+        responses={200: KnowledgeArticleSerializer},
+        operation_id='kb_articles_publish',
+        summary='Publish article (staff only)'
+    ),
+    archive=extend_schema(
+        responses={200: KnowledgeArticleSerializer},
+        operation_id='kb_articles_archive',
+        summary='Archive article (staff only)'
+    )
+)
 class KnowledgeArticleViewSet(ViewSet):
     """Knowledge Article ViewSet"""
     permission_classes = [IsAuthenticated]
@@ -334,6 +409,12 @@ class KnowledgeArticleViewSet(ViewSet):
         serializer = KnowledgeArticleSerializer(article)
         return Response(serializer.data)
     
+    @extend_schema(
+        request=FeedbackSerializer,
+        responses={200: MessageResponseSerializer},
+        operation_id='kb_articles_feedback',
+        summary='Submit article feedback'
+    )
     def feedback(self, request, pk=None):
         """
         POST /api/knowledge/articles/:id/feedback
@@ -365,6 +446,11 @@ class KnowledgeArticleViewSet(ViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    responses={200: KnowledgeArticleListSerializer(many=True)},
+    operation_id='kb_faq_list',
+    summary='List FAQ articles'
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def faq_list(request):
@@ -379,6 +465,15 @@ def faq_list(request):
     return Response(serializer.data)
 
 
+@extend_schema(
+    parameters=[
+        OpenApiParameter(name='query', type=OpenApiTypes.STR, required=False, description='Search query'),
+        OpenApiParameter(name='limit', type=OpenApiTypes.INT, required=False, description='Result limit'),
+    ],
+    responses={200: KnowledgeArticleListSerializer(many=True)},
+    operation_id='kb_suggestions',
+    summary='Get article search suggestions'
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def suggestions(request):
@@ -403,6 +498,11 @@ def suggestions(request):
     return Response(serializer.data)
 
 
+@extend_schema(
+    responses={200: {'type': 'array', 'items': {'type': 'string'}}},
+    operation_id='kb_categories_list',
+    summary='List all categories'
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def categories_list(request):
@@ -419,6 +519,11 @@ def categories_list(request):
     return Response(categories)
 
 
+@extend_schema(
+    responses={200: {'type': 'array', 'items': {'type': 'string'}}},
+    operation_id='kb_tags_list',
+    summary='List all tags'
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def tags_list(request):

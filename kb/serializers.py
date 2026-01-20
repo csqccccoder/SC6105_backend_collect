@@ -145,3 +145,43 @@ class KnowledgeArticleListSerializer(serializers.ModelSerializer):
 class FeedbackSerializer(serializers.Serializer):
     """Feedback serializer"""
     helpful = serializers.BooleanField()
+
+
+# ============================================================
+# Swagger Documentation Serializers (for API docs only, no business logic changes)
+# ============================================================
+
+class KnowledgeListQuerySerializer(serializers.Serializer):
+    """Query parameters for knowledge article list endpoints (Swagger only)"""
+    keyword = serializers.CharField(required=False)
+    query = serializers.CharField(required=False)
+    category = serializers.CharField(required=False)
+    tag = serializers.CharField(required=False)
+    status = serializers.CharField(required=False)
+    page = serializers.IntegerField(required=False, default=1)
+    pageSize = serializers.IntegerField(required=False, default=10)
+
+
+class SuggestionsQuerySerializer(serializers.Serializer):
+    """Query parameters for suggestions endpoint (Swagger only)"""
+    query = serializers.CharField(required=False)
+    limit = serializers.IntegerField(required=False, default=5)
+
+
+class PaginatedKnowledgeArticleListResponseSerializer(serializers.Serializer):
+    """Paginated response for knowledge article list (Swagger only)"""
+    items = KnowledgeArticleListSerializer(many=True)
+    page = serializers.IntegerField()
+    pageSize = serializers.IntegerField()
+    total = serializers.IntegerField()
+    totalPages = serializers.IntegerField()
+
+
+class MessageResponseSerializer(serializers.Serializer):
+    """Generic message response (Swagger only)"""
+    message = serializers.CharField()
+
+
+class DeleteResponseSerializer(serializers.Serializer):
+    """Delete response (Swagger only)"""
+    deleted = serializers.BooleanField()

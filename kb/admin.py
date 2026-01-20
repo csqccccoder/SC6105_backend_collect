@@ -12,12 +12,14 @@ class TagAdmin(admin.ModelAdmin):
 
 @admin.register(KnowledgeArticle)
 class KnowledgeArticleAdmin(admin.ModelAdmin):
-    """Knowledge Article admin"""
+    """Knowledge Article admin - SSO compatible"""
+    # Optimized display order: title, category, author, status, FAQ
     list_display = [
-        'id', 'title', 'category', 'status', 'access_level', 
-        'is_faq', 'view_count', 'created_by', 'created_at'
+        'id', 'title', 'category', 'created_by', 'status', 'is_faq',
+        'access_level', 'view_count', 'created_at'
     ]
     list_filter = ['status', 'access_level', 'is_faq', 'category', 'created_at']
+    # Enable search by title, content and summary
     search_fields = ['title', 'content', 'summary']
     readonly_fields = [
         'view_count', 'helpful_count', 'not_helpful_count',
