@@ -58,6 +58,10 @@ DEBUG=True
 SECRET_KEY=change-me-in-development
 ALLOWED_HOSTS=localhost,127.0.0.1
 
+# 用户相关环境变量
+GOOGLE_OAUTH_CLIENT_ID=申请的OAuth 2.0 客户端 ID
+ADMIN_EMAILS=管理员的邮箱地址，有多个时用英文逗号隔开
+
 # Optional: PostgreSQL configuration for future deployment
 USE_POSTGRES=False
 DB_NAME=helpdesk
