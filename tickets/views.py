@@ -1,297 +1,271 @@
-import math
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
-from django.db.models import Q
-from django.utils import timezone
-from .models import Ticket, TicketCategory, TicketComment, TicketStatusHistory
-from .serializers import TicketCreateSerializer, TicketCategorySerializer, TicketListItemSerializer, TicketDetailSerializer, TicketCommentCreateSerializer, TicketCommentSerializer, TicketStatusChangeSerializer, TicketStatusHistorySerializer, TicketAssignSerializer, TicketUpdateSerializer, TicketSatisfactionSerializer
-from rest_framework.generics import ListCreateAPIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.generics import (
+    ListCreateAPIView,
+    ListAPIView,
+    RetrieveAPIView,
+    GenericAPIView,
+)
 from drf_spectacular.utils import extend_schema
+
+from .models import Ticket, TicketCategory, TicketComment, TicketStatusHistory
+from .serializers import (
+    TicketCreateSerializer,
+    TicketListItemSerializer,
+    TicketDetailSerializer,
+    TicketCategorySerializer,
+    TicketUpdateSerializer,
+    TicketAssignSerializer,
+    TicketStatusChangeSerializer,
+    TicketCommentCreateSerializer,
+    TicketCommentSerializer,
+    TicketSatisfactionSerializer,
+)
+
+from accounts.permissions import IsStaffMember, IsAdminOrManager
+from accounts.models import User
+
+
+def _get_user_display_name(user):
+    return getattr(user, "name", None) or getattr(user, "username", None) or "User"
+
+
+def _is_staff(user):
+    return getattr(user, "role", None) in [
+        User.Role.ADMIN,
+        User.Role.MANAGER,
+        User.Role.SUPPORT_STAFF,
+    ]
+
+
+def _is_owner(user, ticket: Ticket):
+    return str(ticket.requester_id) == str(user.id)
+
 
 @extend_schema(
     request=TicketCreateSerializer,
     responses={201: TicketDetailSerializer},
 )
 class TicketListCreateView(ListCreateAPIView):
-    queryset = Ticket.objects.all()
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = Ticket.objects.all().order_by("-created_at")
+        # 非 staff 只能看自己的
+        if not _is_staff(self.request.user):
+            qs = qs.filter(requester_id=str(self.request.user.id))
+        return qs
 
     def get_serializer_class(self):
         if self.request.method == "POST":
             return TicketCreateSerializer
-        return TicketDetailSerializer
+        return TicketListItemSerializer
 
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def create_ticket(request):
-    serializer = TicketCreateSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
+    def perform_create(self, serializer):
+        user = self.request.user
+        serializer.save(
+            status="new",
+            channel="web",
+            requester_id=str(user.id),
+            requester_name=_get_user_display_name(user),
+            requester_email=getattr(user, "email", "") or "",
+        )
 
-    category = TicketCategory.objects.get(id=serializer.validated_data["category_id"])
+    def create(self, request, *args, **kwargs):
+        create_serializer = self.get_serializer(data=request.data)
+        create_serializer.is_valid(raise_exception=True)
+        self.perform_create(create_serializer)
 
-    ticket = Ticket.objects.create(
-        title=serializer.validated_data["title"],
-        description=serializer.validated_data.get("description", ""),
-        category=category,
-        priority=serializer.validated_data["priority"],
-        status="new",
-        channel="web",
-        # A 路线：没有登录，就用占位 requester（或允许前端可选传入覆盖）
-        requester_id=request.data.get("requesterId", "dev-user"),
-        requester_name=request.data.get("requesterName", "Dev User"),
-        requester_email=request.data.get("requesterEmail", "dev@example.com"),
-    )
-
-    # 按接口文档返回 Ticket 结构（先给空数组：attachments/comments/statusHistory）
-    data = {
-        "id": str(ticket.id),
-        "title": ticket.title,
-        "description": ticket.description,
-        "status": ticket.status,
-        "priority": ticket.priority,
-        "category": TicketCategorySerializer(ticket.category).data,
-        "channel": ticket.channel,
-        "requesterId": ticket.requester_id,
-        "requesterName": ticket.requester_name,
-        "requesterEmail": ticket.requester_email,
-        "assigneeId": ticket.assignee_id,
-        "assigneeName": ticket.assignee_name,
-        "teamId": ticket.team_id,
-        "teamName": ticket.team_name,
-        "attachments": [],
-        "comments": [],
-        "statusHistory": [],
-        "slaResponseDeadline": ticket.sla_response_deadline,
-        "slaResolutionDeadline": ticket.sla_resolution_deadline,
-        "slaBreached": ticket.sla_breached,
-        "satisfactionRating": ticket.satisfaction_rating,
-        "satisfactionComment": ticket.satisfaction_comment,
-        "createdAt": ticket.created_at,
-        "updatedAt": ticket.updated_at,
-        "resolvedAt": ticket.resolved_at,
-        "closedAt": ticket.closed_at,
-    }
-    return Response(data)  # 你的全局包装会自动包 {code,message,data}
-
-@api_view(["GET"])
-@permission_classes([AllowAny])  # 先按 A 路线，不做权限阻塞
-def list_categories(request):
-    qs = TicketCategory.objects.all().order_by("name")
-    data = TicketCategorySerializer(qs, many=True).data
-    return Response(data)
+        ticket = create_serializer.instance
+        detail_data = TicketDetailSerializer(ticket, context={"request": request}).data
+        return Response(detail_data, status=status.HTTP_201_CREATED)
 
 
+class TicketCategoryListView(ListAPIView):
+    permission_classes = [IsAuthenticated]
+    queryset = TicketCategory.objects.all().order_by("name")
+    serializer_class = TicketCategorySerializer
 
-@api_view(["GET"])
-@permission_classes([AllowAny])  # A 路线：先不做权限阻塞
-def list_tickets(request):
-    # Query params (camelCase will be converted to snake_case by the parser is for body; for query params we read both)
-    page = int(request.query_params.get("page", 1))
-    page_size = int(request.query_params.get("pageSize", request.query_params.get("page_size", 10)))
 
-    status_ = request.query_params.get("status")
-    priority = request.query_params.get("priority")
-    category_id = request.query_params.get("categoryId", request.query_params.get("category_id"))
-    assignee_id = request.query_params.get("assigneeId", request.query_params.get("assignee_id"))
-    keyword = request.query_params.get("keyword")
+class TicketDetailView(RetrieveAPIView):
+    permission_classes = [IsAuthenticated]
+    queryset = Ticket.objects.all()
+    serializer_class = TicketDetailSerializer
+    lookup_url_kwarg = "ticket_id"
 
-    qs = Ticket.objects.select_related("category").all().order_by("-created_at")
+    def retrieve(self, request, *args, **kwargs):
+        ticket = self.get_object()
 
-    if status_:
-        qs = qs.filter(status=status_)
-    if priority:
-        qs = qs.filter(priority=priority)
-    if category_id:
-        qs = qs.filter(category_id=category_id)
-    if assignee_id:
-        qs = qs.filter(assignee_id=assignee_id)
-    if keyword:
-        qs = qs.filter(Q(title__icontains=keyword) | Q(description__icontains=keyword))
+        # 非 staff 只能看自己的 ticket
+        if not _is_staff(request.user) and not _is_owner(request.user, ticket):
+            return Response(
+                {"detail": "Not allowed"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-    total = qs.count()
-    total_pages = max(1, math.ceil(total / page_size))
-    page = max(1, min(page, total_pages))
+        data = self.get_serializer(ticket).data
+        return Response(data, status=status.HTTP_200_OK)
 
-    start = (page - 1) * page_size
-    end = start + page_size
-    items = TicketListItemSerializer(qs[start:end], many=True).data
 
-    data = {
-        "items": items,
-        "page": page,
-        "pageSize": page_size,
-        "total": total,
-        "totalPages": total_pages,
-    }
-    return Response(data)
+@extend_schema(request=TicketUpdateSerializer, responses={200: TicketDetailSerializer})
+class TicketUpdateView(GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = TicketUpdateSerializer
 
-@api_view(["GET"])
-@permission_classes([AllowAny])  # A 路线：先不做权限阻塞
-def get_ticket_detail(request, ticket_id):
-    ticket = get_object_or_404(Ticket.objects.select_related("category"), id=ticket_id)
-    data = TicketDetailSerializer(ticket).data
+    def put(self, request, ticket_id):
+        ticket = get_object_or_404(Ticket, id=ticket_id)
 
-    # 按接口文档补齐：先返回空数组，后续再做 Comment/History/Attachment 表
-    data["attachments"] = []
-    data["comments"] = [TicketCommentSerializer(ticket.comments.all(), many=True).data]
-    data["statusHistory"] = [TicketStatusHistorySerializer(ticket.status_histories.all(), many=True).data]
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
 
-    return Response(data)
+        if "title" in data:
+            ticket.title = data["title"]
+        if "description" in data:
+            ticket.description = data["description"]
+        if "priority" in data:
+            ticket.priority = data["priority"]
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def add_ticket_comment(request, ticket_id):
-    ticket = get_object_or_404(Ticket, id=ticket_id)
+        if "category_id" in data:
+            category = get_object_or_404(TicketCategory, id=data["category_id"])
+            ticket.category = category
 
-    serializer = TicketCommentCreateSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
+        if "assignee_id" in data:
+            ticket.assignee_id = data["assignee_id"]
+        if "team_id" in data:
+            ticket.team_id = data["team_id"]
 
-    comment = serializer.save(
-        ticket=ticket,
-        # A 路线：暂时填占位作者；以后接 auth 后替换为 request.user
-        author_id="system",
-        author_name="System",
-        author_email=None,
-    )
+        ticket.updated_at = timezone.now()
+        ticket.save()
 
-    return Response(TicketCommentSerializer(comment).data)
+        out = TicketDetailSerializer(ticket, context={"request": request}).data
+        return Response(out, status=status.HTTP_200_OK)
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def change_ticket_status(request, ticket_id):
-    ticket = get_object_or_404(Ticket, id=ticket_id)
 
-    ser = TicketStatusChangeSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
+@extend_schema(request=TicketAssignSerializer, responses={200: TicketDetailSerializer})
+class TicketAssignView(GenericAPIView):
+    permission_classes = [IsAdminOrManager]
+    serializer_class = TicketAssignSerializer
 
-    new_status = ser.validated_data["status"]
-    comment = ser.validated_data.get("comment", "")
+    def post(self, request, ticket_id):
+        ticket = get_object_or_404(Ticket, id=ticket_id)
 
-    old_status = ticket.status
-    if old_status == new_status:
-        # 不强制报错也行，这里选择直接返回当前 ticket 状态
-        return Response({"id": str(ticket.id), "status": ticket.status})
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
 
-    # 1) 更新 Ticket
-    ticket.status = new_status
+        ticket.assignee_id = data["assignee_id"]
+        ticket.team_id = data.get("team_id")
 
-    # 可选：如果你模型里有 resolved_at / closed_at 字段，就顺手维护
-    if new_status == "resolved":
-        ticket.resolved_at = timezone.now()
-    if new_status == "closed":
-        ticket.closed_at = timezone.now()
+        if ticket.status == "new":
+            ticket.status = "assigned"
 
-    ticket.save()
+        ticket.updated_at = timezone.now()
+        ticket.save()
 
-    # 2) 写入状态历史
-    TicketStatusHistory.objects.create(
-        ticket=ticket,
-        from_status=old_status,
-        to_status=new_status,
-        comment=comment or None,
-        changed_by_id="system",
-        changed_by_name="System",
-    )
+        out = TicketDetailSerializer(ticket, context={"request": request}).data
+        return Response(out, status=status.HTTP_200_OK)
 
-    # 3) 返回（先简单返回当前状态；也可以按你们前端需要返回整张 Ticket）
-    return Response({"id": str(ticket.id), "status": ticket.status})
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def assign_ticket(request, ticket_id):
-    
-    print("DEBUG request.data =", request.data)
-    ticket = get_object_or_404(Ticket, id=ticket_id)
+@extend_schema(request=TicketStatusChangeSerializer, responses={200: TicketDetailSerializer})
+class TicketStatusChangeView(GenericAPIView):
+    permission_classes = [IsStaffMember]
+    serializer_class = TicketStatusChangeSerializer
 
-    ser = TicketAssignSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
+    def post(self, request, ticket_id):
+        ticket = get_object_or_404(Ticket, id=ticket_id)
 
-    assignee_id = ser.validated_data["assignee_id"]
-    team_id = ser.validated_data.get("team_id")
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
 
-    # A 路线：没有用户/团队表，先做占位映射（后面接权限模块再替换）
-    ticket.assignee_id = assignee_id
-    ticket.assignee_name = f"User {assignee_id}"
+        old_status = ticket.status
+        new_status = data["status"]
+        comment = data.get("comment", "")
 
-    if team_id:
-        ticket.team_id = team_id
-        ticket.team_name = f"Team {team_id}"
-    else:
-        ticket.team_id = None
-        ticket.team_name = None
+        if old_status != new_status:
+            ticket.status = new_status
 
-    # 推荐：分配后自动进入 assigned（如果你们不想自动改状态，删掉这两行即可）
-    if ticket.status == "new":
-        ticket.status = "assigned"
+            TicketStatusHistory.objects.create(
+                ticket=ticket,
+                from_status=old_status,
+                to_status=new_status,
+                comment=comment,
+                changed_by_id=str(request.user.id),
+                changed_by_name=_get_user_display_name(request.user),
+                changed_at=timezone.now(),
+            )
 
-    ticket.save()
+            if new_status == "resolved":
+                ticket.resolved_at = timezone.now()
+            if new_status == "closed":
+                ticket.closed_at = timezone.now()
 
-    return Response({
-        "id": str(ticket.id),
-        "assigneeId": ticket.assignee_id,
-        "assigneeName": ticket.assignee_name,
-        "teamId": ticket.team_id,
-        "teamName": ticket.team_name,
-        "status": ticket.status,
-    })
+        ticket.updated_at = timezone.now()
+        ticket.save()
 
-@api_view(["PUT"])
-@permission_classes([AllowAny])
-def update_ticket(request, ticket_id):
-    ticket = get_object_or_404(Ticket, id=ticket_id)
+        out = TicketDetailSerializer(ticket, context={"request": request}).data
+        return Response(out, status=status.HTTP_200_OK)
 
-    ser = TicketUpdateSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
 
-    data = ser.validated_data
+@extend_schema(request=TicketCommentCreateSerializer, responses={201: TicketCommentSerializer})
+class TicketCommentCreateView(GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = TicketCommentCreateSerializer
 
-    # 简单字段
-    if "title" in data:
-        ticket.title = data["title"]
-    if "description" in data:
-        ticket.description = data["description"]
-    if "priority" in data:
-        ticket.priority = data["priority"]
+    def post(self, request, ticket_id):
+        ticket = get_object_or_404(Ticket, id=ticket_id)
 
-    # 分类
-    if "category_id" in data:
-        ticket.category_id = data["category_id"]
+        if not _is_staff(request.user) and not _is_owner(request.user, ticket):
+            return Response(
+                {"detail": "Not allowed"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-    # 分派/团队（允许置空）
-    if "assignee_id" in data:
-        ticket.assignee_id = data["assignee_id"] or None
-        ticket.assignee_name = f"User {ticket.assignee_id}" if ticket.assignee_id else None
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
 
-    if "team_id" in data:
-        ticket.team_id = data["team_id"] or None
-        ticket.team_name = f"Team {ticket.team_id}" if ticket.team_id else None
+        comment = TicketComment.objects.create(
+            ticket=ticket,
+            content=data["content"],
+            is_internal=data.get("is_internal", False),
+            author_id=str(request.user.id),
+            author_name=_get_user_display_name(request.user),
+            author_email=getattr(request.user, "email", "") or "",
+            created_at=timezone.now(),
+        )
 
-    ticket.save()
+        out = TicketCommentSerializer(comment, context={"request": request}).data
+        return Response(out, status=status.HTTP_201_CREATED)
 
-    out = TicketDetailSerializer(ticket).data
-    out["attachments"] = []
-    out["comments"] = [TicketCommentSerializer(ticket.comments.all(), many=True).data]
-    out["statusHistory"] = [TicketStatusHistorySerializer(ticket.status_histories.all(), many=True).data]
-    return Response(out)
 
-@api_view(["POST"])
-@permission_classes([AllowAny])
-def submit_satisfaction(request, ticket_id):
-    ticket = get_object_or_404(Ticket, id=ticket_id)
+@extend_schema(request=TicketSatisfactionSerializer, responses={200: TicketDetailSerializer})
+class TicketSatisfactionView(GenericAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = TicketSatisfactionSerializer
 
-    ser = TicketSatisfactionSerializer(data=request.data)
-    ser.is_valid(raise_exception=True)
+    def post(self, request, ticket_id):
+        ticket = get_object_or_404(Ticket, id=ticket_id)
 
-    ticket.satisfaction_rating = ser.validated_data["rating"]
-    ticket.satisfaction_comment = ser.validated_data.get("comment") or None
-    ticket.save()
+        if not _is_owner(request.user, ticket):
+            return Response(
+                {"detail": "Not allowed"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-    return Response({
-        "id": str(ticket.id),
-        "satisfactionRating": ticket.satisfaction_rating,
-        "satisfactionComment": ticket.satisfaction_comment,
-    })
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        ticket.satisfaction_rating = data["rating"]
+        ticket.satisfaction_comment = data.get("comment")
+        ticket.updated_at = timezone.now()
+        ticket.save()
+
+        out = TicketDetailSerializer(ticket, context={"request": request}).data
+        return Response(out, status=status.HTTP_200_OK)
