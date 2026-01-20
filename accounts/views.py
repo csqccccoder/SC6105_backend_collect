@@ -280,6 +280,7 @@ class LoginView(APIView):
             403: OpenApiResponse(),
             500: OpenApiResponse()
         },
+        auth=[],
         tags=["Authentication"]
     )
     def post(self, request):

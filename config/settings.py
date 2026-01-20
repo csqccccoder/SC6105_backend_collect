@@ -210,4 +210,17 @@ SPECTACULAR_SETTINGS = {
     'TITLE': 'IT Service Ticketing & Knowledge Base API',
     'DESCRIPTION': 'Backend API for the IT service ticketing and knowledge base platform.',
     'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': '/api',
+    'APPEND_COMPONENTS': {
+        'securitySchemes': {
+            'BearerAuth': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT',
+            }
+        }
+    },
+    'SECURITY': [{'BearerAuth': []}],
 }
