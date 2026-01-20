@@ -11,6 +11,10 @@ class TicketCreateSerializer(serializers.Serializer):
         if not TicketCategory.objects.filter(id=value).exists():
             raise serializers.ValidationError("category_id not found")
         return value
+    
+    class Meta:
+        model = Ticket
+        fields = ["title", "category_id", "description", "priority", "attachments"]
 
 class TicketCategorySerializer(serializers.ModelSerializer):
     parentId = serializers.UUIDField(source="parent_id", allow_null=True, required=False)

@@ -2,17 +2,31 @@ import math
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from django.utils import timezone
 from .models import Ticket, TicketCategory, TicketComment, TicketStatusHistory
 from .serializers import TicketCreateSerializer, TicketCategorySerializer, TicketListItemSerializer, TicketDetailSerializer, TicketCommentCreateSerializer, TicketCommentSerializer, TicketStatusChangeSerializer, TicketStatusHistorySerializer, TicketAssignSerializer, TicketUpdateSerializer, TicketSatisfactionSerializer
+from rest_framework.generics import ListCreateAPIView
+from drf_spectacular.utils import extend_schema
+
+@extend_schema(
+    request=TicketCreateSerializer,
+    responses={201: TicketDetailSerializer},
+)
+class TicketListCreateView(ListCreateAPIView):
+    queryset = Ticket.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return TicketCreateSerializer
+        return TicketDetailSerializer
 
 @api_view(["POST"])
-@permission_classes([AllowAny])  # A 路线：先不做鉴权阻塞
+@permission_classes([IsAuthenticated])
 def create_ticket(request):
     serializer = TicketCreateSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
