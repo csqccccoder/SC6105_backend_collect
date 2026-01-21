@@ -30,7 +30,7 @@ def is_staff_user(user):
     # 1. Priority check: SSO synced role field
     if hasattr(user, 'role') and user.role:
         # Ensure role is string and in allowed roles list
-        if isinstance(user.role, str) and user.role.lower() in ['staff', 'manager', 'admin']:
+        if isinstance(user.role, str) and user.role.lower() in ['support_staff', 'staff', 'manager', 'admin']:
             return True
     
     # 2. Fallback to Django built-in permission fields
@@ -533,7 +533,7 @@ def tags_list(request):
     """
     queryset = get_visible_articles_queryset(request.user)
     
-    # Get all tags from visible articles using reverse M2M relationship
-    tags = Tag.objects.filter(knowledgearticle__in=queryset).distinct().order_by('name')
+    # Get all tags from visible articles using correct related_name 'articles'
+    tags = Tag.objects.filter(articles__in=queryset).distinct().order_by('name')
     
     return Response(list(tags.values_list('name', flat=True)))

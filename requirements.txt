@@ -1,22 +1,20 @@
-# Django
+# Django Core
 Django>=4.2,<5.0
+django-environ>=0.10.0
 
-# Django REST Framework
+# DRF & API
 djangorestframework>=3.14.0
+djangorestframework-simplejwt>=5.2.0
+djangorestframework-camel-case>=1.4.2
+drf-spectacular>=0.26.0
+django-cors-headers>=4.0.0
 
-# PostgreSQL Driver
+# Database
 psycopg2-binary>=2.9.0
 
-# Google OAuth & JWT Authentication (SSO 登录必需)
+# Utilities & Auth
 google-auth>=2.16.0
-djangorestframework-simplejwt>=5.2.0
 requests>=2.31.0
-
-# CORS (如果前端需要跨域请求)
-# django-cors-headers>=4.0.0
-
-# 环境变量管理 (推荐使用)
-# python-decouple>=3.8
 
 # 开发工具
 # django-debug-toolbar>=4.0.0

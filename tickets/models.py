@@ -94,6 +94,29 @@ class TicketComment(models.Model):
     class Meta:
         ordering = ["created_at"]
 
+
+class TicketAttachment(models.Model):
+    """Ticket attachment model"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey("Ticket", related_name="attachments", on_delete=models.CASCADE)
+    
+    filename = models.CharField(max_length=255)
+    file = models.FileField(upload_to='ticket_attachments/%Y/%m/%d/')
+    file_size = models.IntegerField(default=0)
+    mime_type = models.CharField(max_length=100, blank=True, default='')
+    
+    uploaded_by_id = models.CharField(max_length=64, null=True, blank=True)
+    uploaded_by_name = models.CharField(max_length=128, null=True, blank=True)
+    
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ["-uploaded_at"]
+    
+    def __str__(self):
+        return f"{self.filename} ({self.ticket_id})"
+
+
 class TicketStatusHistory(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ticket = models.ForeignKey("Ticket", related_name="status_histories", on_delete=models.CASCADE)
@@ -110,3 +133,25 @@ class TicketStatusHistory(models.Model):
 
     class Meta:
         ordering = ["changed_at"]
+
+
+class SLAConfig(models.Model):
+    """SLA Configuration model for different priority levels"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    priority = models.CharField(max_length=10, choices=TicketPriority.choices, unique=True)
+    response_time = models.IntegerField(help_text="Response time in hours")
+    resolution_time = models.IntegerField(help_text="Resolution time in hours")
+    description = models.TextField(blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "SLA Configuration"
+        verbose_name_plural = "SLA Configurations"
+        ordering = ["priority"]
+    
+    def __str__(self):
+        return f"SLA for {self.priority}: {self.response_time}h response, {self.resolution_time}h resolution"

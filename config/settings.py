@@ -160,6 +160,10 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# Media files (User uploads)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
@@ -203,9 +207,18 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ),
     "EXCEPTION_HANDLER": "accounts.exceptions.custom_exception_handler",
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 } 
-#CORS_SETTINGS ADD BY D 
+
+# ===== CORS Configuration =====
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+CORS_ALLOW_CREDENTIALS = True
+
 SPECTACULAR_SETTINGS = {
     'TITLE': 'IT Service Ticketing & Knowledge Base API',
     'DESCRIPTION': 'Backend API for the IT service ticketing and knowledge base platform.',

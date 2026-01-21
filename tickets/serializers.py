@@ -1,11 +1,17 @@
 from rest_framework import serializers
-from .models import Ticket, TicketCategory, TicketComment, TicketStatusHistory
+from .models import Ticket, TicketCategory, TicketComment, TicketStatusHistory, TicketAttachment, SLAConfig
 
 
 class TicketCategorySerializer(serializers.ModelSerializer):
+    parent = serializers.PrimaryKeyRelatedField(
+        queryset=TicketCategory.objects.all(),
+        required=False,
+        allow_null=True
+    )
+    
     class Meta:
         model = TicketCategory
-        fields = ["id", "name", "description", "parent_id"]
+        fields = ["id", "name", "description", "parent"]
 
 class TicketCreateSerializer(serializers.ModelSerializer):
     category_id = serializers.PrimaryKeyRelatedField(
@@ -93,7 +99,10 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_attachments(self, obj):
-        return []
+        qs = self._get_related_queryset(obj, "attachments", "ticketattachment_set")
+        if qs is None:
+            return []
+        return TicketAttachmentSerializer(qs.order_by("-uploaded_at"), many=True, context=self.context).data
 
     def _get_related_queryset(self, obj, preferred_related_name: str, fallback_attr: str):
         # 兼容模型里是否设置 related_name
@@ -149,3 +158,35 @@ class TicketUpdateSerializer(serializers.Serializer):
 class TicketSatisfactionSerializer(serializers.Serializer):
     rating = serializers.IntegerField(min_value=1, max_value=5)
     comment = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class TicketAttachmentSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = TicketAttachment
+        fields = ['id', 'filename', 'url', 'file_size', 'mime_type', 'uploaded_at', 'uploaded_by_id', 'uploaded_by_name']
+    
+    def get_url(self, obj):
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None
+
+
+class SLAConfigSerializer(serializers.ModelSerializer):
+    """Serializer for SLA Configuration"""
+    responseTime = serializers.IntegerField(source='response_time', required=True)
+    resolutionTime = serializers.IntegerField(source='resolution_time', required=True)
+    isActive = serializers.BooleanField(source='is_active', required=False, default=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    
+    class Meta:
+        model = SLAConfig
+        fields = ['id', 'priority', 'responseTime', 'resolutionTime', 'description', 'isActive', 'createdAt', 'updatedAt']
+        extra_kwargs = {
+            'description': {'required': False, 'default': ''},
+        }

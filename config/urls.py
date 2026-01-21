@@ -17,6 +17,8 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import RedirectView
+from django.conf import settings
+from django.conf.urls.static import static
 from rest_framework.decorators import api_view
 from rest_framework.response import Response 
 
@@ -27,10 +29,16 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/ping/", ping),
     path("api/health/", health_check, name="health-check"),
+    path("api/", include("accounts.urls")),
     path("api/", include("tickets.urls")),
+    path("api/", include("kb.urls")),
     path("api/accounts/", include("accounts.urls")),
     path("api/kb/", include("kb.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"), 
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"), 
     path("", RedirectView.as_view(url="/api/docs/", permanent=False)), #接Swagger 可以用 /api/docs/ 访问 
-] 
+]
+
+# Serve media files in development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT) 

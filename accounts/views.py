@@ -10,7 +10,7 @@ from google.auth.transport import requests
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 from .models import User, Team, TeamMembership, AuditLog
-from .permissions import IsAdmin, IsStaffMember
+from .permissions import IsAdmin, IsStaffMember, IsAdminOrManager
 from .serializers import (
     UserSerializer,
     UserDetailSerializer,
@@ -288,12 +288,15 @@ class LoginView(APIView):
         if not ssoToken:
             return error_response('ssoToken is required', 400, status.HTTP_400_BAD_REQUEST)
         
-        client_id = os.getenv('GOOGLE_OAUTH_CLIENT_ID')
+        from django.conf import settings
+        client_id = settings.GOOGLE_OAUTH_CLIENT_ID
+        
         if not client_id:
             return error_response('Google OAuth not configured', 500, status.HTTP_500_INTERNAL_SERVER_ERROR)
         
         try:
-            payload = id_token.verify_oauth2_token(ssoToken, self.google_request, client_id)
+            # Add clock skew tolerance (e.g., 10 seconds) to handle time sync issues
+            payload = id_token.verify_oauth2_token(ssoToken, self.google_request, client_id, clock_skew_in_seconds=10)
 
             email = payload.get('email')
             if not email:
@@ -348,8 +351,10 @@ class LoginView(APIView):
             )
             
         except ValueError as e:
+            print(f"SSO Verification Error: {str(e)}") # Debug Log
             return error_response(f'Invalid Google token: {str(e)}', 401, status.HTTP_401_UNAUTHORIZED)
         except Exception as e:
+            print(f"SSO Unexpected Error: {str(e)}") # Debug Log
             return error_response(f'Authentication failed: {str(e)}', 500, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -597,11 +602,11 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
     Audit Log ViewSet (只读)
     
-    仅管理员可访问
+    管理员和经理可访问
     """
     queryset = AuditLog.objects.all()
     serializer_class = AuditLogSerializer
-    permission_classes = [IsAdmin]
+    permission_classes = [IsAdminOrManager]  # Changed from IsAdmin to allow Manager access
     pagination_class = CustomPagination
     
     def get_queryset(self):
