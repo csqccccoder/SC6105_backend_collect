@@ -455,14 +455,41 @@ class SLAConfigDetailView(GenericAPIView):
     
     def put(self, request, sla_id):
         sla = self.get_object(sla_id)
-        serializer = self.get_serializer(sla, data=request.data, partial=True)
+        # Debug prints to ensure visibility in console
+        print(f"SLA update request data for {sla_id}: {request.data}")
+
+        # Normalize incoming keys: accept snake_case (from frontend) and map to serializer camelCase fields
+        incoming = None
+        try:
+            # request.data might be QueryDict or dict-like
+            incoming = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        except Exception:
+            incoming = dict(request.data)
+
+        # Map known snake_case keys to serializer field names if not already provided
+        key_map = {
+            'response_time': 'responseTime',
+            'resolution_time': 'resolutionTime',
+            'is_active': 'isActive'
+        }
+
+        for snake, camel in key_map.items():
+            if snake in incoming and camel not in incoming:
+                incoming[camel] = incoming.pop(snake)
+
+        print(f"SLA normalized request data for {sla_id}: {incoming}")
+
+        serializer = self.get_serializer(sla, data=incoming, partial=True)
         if serializer.is_valid():
+            print(f"SLA serializer validated data: {serializer.validated_data}")
             # If priority is being changed, check for duplicates
             new_priority = serializer.validated_data.get('priority')
             if new_priority and new_priority != sla.priority:
                 if SLAConfig.objects.filter(priority=new_priority).exists():
                     return error_response(f"SLA configuration for priority '{new_priority}' already exists", code=400, status_code=400)
             serializer.save()
+            # Print saved object for debugging
+            print(f"SLA object after save: {self.get_serializer(sla).data}")
             return success_response(serializer.data, message='SLA configuration updated')
         return error_response(serializer.errors, code=400, status_code=400)
     
