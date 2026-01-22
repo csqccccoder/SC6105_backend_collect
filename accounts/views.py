@@ -1,4 +1,5 @@
 import os
+from django.utils import timezone
 
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -9,7 +10,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 
-from .models import User, Team, TeamMembership, AuditLog
+from .models import User, Team, TeamMembership, AuditLog, Notification, NotificationPreference
 from .permissions import IsAdmin, IsStaffMember, IsAdminOrManager
 from .serializers import (
     UserSerializer,
@@ -28,6 +29,8 @@ from .serializers import (
     LogoutRequestSerializer,
     RefreshTokenRequestSerializer,
     ChangeRoleRequestSerializer,
+    NotificationSerializer,
+    NotificationPreferenceSerializer,
 )
 from .response_wrapper import APIResponse, success_response, error_response
 from .pagination import CustomPagination
@@ -528,8 +531,22 @@ class TeamViewSet(viewsets.ModelViewSet):
         Body: {"userId": 1, "role": "member"}
         """
         team = self.get_object()
+
+        # Normalize incoming keys: accept snake_case (e.g. user_id) and map to serializer camelCase fields
+        try:
+            incoming = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        except Exception:
+            incoming = dict(request.data)
+
+        key_map = {
+            'user_id': 'userId',
+        }
+        for snake, camel in key_map.items():
+            if snake in incoming and camel not in incoming:
+                incoming[camel] = incoming.pop(snake)
+
         serializer = AddTeamMemberSerializer(
-            data=request.data,
+            data=incoming,
             context={'team': team}
         )
         serializer.is_valid(raise_exception=True)
@@ -650,3 +667,152 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         
         serializer = self.get_serializer(queryset, many=True)
         return success_response(serializer.data)
+
+
+class NotificationViewSet(viewsets.ModelViewSet):
+    """
+    通知视图集
+    
+    提供通知的查询和标记已读操作
+    """
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = CustomPagination
+    
+    def get_queryset(self):
+        """返回当前用户的通知"""
+        return Notification.objects.filter(recipient=self.request.user).order_by('-created_at')
+    
+    def list(self, request, *args, **kwargs):
+        """
+        获取当前用户的通知列表
+        支持查询参数: page, pageSize, isRead
+        """
+        queryset = self.get_queryset()
+        
+        # 按已读状态过滤
+        is_read = request.query_params.get('isRead')
+        if is_read is not None:
+            is_read_bool = is_read.lower() == 'true'
+            queryset = queryset.filter(is_read=is_read_bool)
+        
+        # 按类型过滤
+        notification_type = request.query_params.get('type')
+        if notification_type:
+            queryset = queryset.filter(type=notification_type)
+        
+        page = self.paginate_queryset(queryset)
+        
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            paginated_response = self.get_paginated_response(serializer.data)
+            return APIResponse(
+                data=paginated_response.data,
+                message='Success',
+                code=200
+            )
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return success_response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def unread_count(self, request):
+        """获取未读通知数量"""
+        count = Notification.objects.filter(
+            recipient=request.user,
+            is_read=False
+        ).count()
+        return success_response({'count': count})
+    
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+        """标记单条通知为已读"""
+        notification = get_object_or_404(
+            Notification,
+            id=pk,
+            recipient=request.user
+        )
+        
+        if not notification.is_read:
+            notification.is_read = True
+            notification.read_at = timezone.now()
+            notification.save()
+        
+        serializer = self.get_serializer(notification)
+        return success_response(serializer.data)
+    
+    @action(detail=False, methods=['post'])
+    def mark_all_read(self, request):
+        """标记所有通知为已读"""
+        now = timezone.now()
+        updated = Notification.objects.filter(
+            recipient=request.user,
+            is_read=False
+        ).update(is_read=True, read_at=now)
+        
+        return success_response({
+            'message': f'{updated} notifications marked as read',
+            'count': updated
+        })
+    
+    def destroy(self, request, *args, **kwargs):
+        """删除通知"""
+        notification = self.get_object()
+        if notification.recipient != request.user:
+            return error_response(
+                message='Cannot delete other user notifications',
+                code=403
+            )
+        notification.delete()
+        return success_response({'message': 'Notification deleted'})
+    
+    @action(detail=False, methods=['delete'])
+    def clear_all(self, request):
+        """清除所有已读通知"""
+        deleted, _ = Notification.objects.filter(
+            recipient=request.user,
+            is_read=True
+        ).delete()
+        
+        return success_response({
+            'message': f'{deleted} notifications deleted',
+            'count': deleted
+        })
+
+
+class NotificationPreferenceViewSet(viewsets.ViewSet):
+    """
+    通知偏好设置视图集
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def list(self, request):
+        """获取当前用户的通知偏好设置"""
+        preferences, _ = NotificationPreference.objects.get_or_create(
+            user=request.user
+        )
+        serializer = NotificationPreferenceSerializer(preferences)
+        return success_response(serializer.data)
+    
+    @action(detail=False, methods=['put', 'patch'])
+    def update_preferences(self, request):
+        """更新通知偏好设置"""
+        preferences, _ = NotificationPreference.objects.get_or_create(
+            user=request.user
+        )
+        
+        serializer = NotificationPreferenceSerializer(
+            preferences,
+            data=request.data,
+            partial=True
+        )
+        
+        if serializer.is_valid():
+            serializer.save()
+            return success_response(serializer.data)
+        
+        return error_response(
+            message='Invalid data',
+            code=400,
+            errors=serializer.errors
+        )

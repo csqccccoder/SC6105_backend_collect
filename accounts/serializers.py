@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Team, TeamMembership, AuditLog
+from .models import User, Team, TeamMembership, AuditLog, Notification, NotificationPreference
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -144,9 +144,19 @@ class AddTeamMemberSerializer(serializers.Serializer):
     def validate_userId(self, value):
         """Validate user exists"""
         try:
-            User.objects.get(id=value)
+            user = User.objects.get(id=value)
         except User.DoesNotExist:
             raise serializers.ValidationError("User not found")
+
+        # Do not allow adding end users to teams
+        try:
+            if user.role == User.Role.END_USER:
+                raise serializers.ValidationError("Cannot add end users to teams")
+        except AttributeError:
+            # Fallback: compare string value if Role enum unavailable
+            if getattr(user, 'role', None) == 'end_user':
+                raise serializers.ValidationError("Cannot add end users to teams")
+
         return value
     
     def validate(self, data):
@@ -208,3 +218,54 @@ class RefreshTokenRequestSerializer(serializers.Serializer):
 class ChangeRoleRequestSerializer(serializers.Serializer):
     """Change role request serializer"""
     role = serializers.ChoiceField(choices=User.Role.choices)
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    """通知序列化器"""
+    
+    relatedObjectType = serializers.CharField(source='related_object_type', allow_null=True)
+    # related_object_id may be UUID or string IDs (tickets use UUIDs), use CharField
+    relatedObjectId = serializers.CharField(source='related_object_id', allow_null=True)
+    isRead = serializers.BooleanField(source='is_read')
+    readAt = serializers.DateTimeField(source='read_at', allow_null=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    
+    class Meta:
+        model = Notification
+        fields = ['id', 'type', 'title', 'message', 'relatedObjectType', 
+                  'relatedObjectId', 'isRead', 'readAt', 'createdAt']
+        read_only_fields = ['id', 'type', 'title', 'message', 'relatedObjectType', 
+                           'relatedObjectId', 'createdAt']
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    """通知偏好设置序列化器"""
+    
+    # Email preferences
+    emailTicketCreated = serializers.BooleanField(source='email_ticket_created')
+    emailTicketAssigned = serializers.BooleanField(source='email_ticket_assigned')
+    emailTicketStatusChanged = serializers.BooleanField(source='email_ticket_status_changed')
+    emailTicketComment = serializers.BooleanField(source='email_ticket_comment')
+    emailSlaWarning = serializers.BooleanField(source='email_sla_warning')
+    emailSlaBreach = serializers.BooleanField(source='email_sla_breach')
+    emailSystem = serializers.BooleanField(source='email_system')
+    emailMention = serializers.BooleanField(source='email_mention')
+    
+    # In-app preferences
+    inappTicketCreated = serializers.BooleanField(source='inapp_ticket_created')
+    inappTicketAssigned = serializers.BooleanField(source='inapp_ticket_assigned')
+    inappTicketStatusChanged = serializers.BooleanField(source='inapp_ticket_status_changed')
+    inappTicketComment = serializers.BooleanField(source='inapp_ticket_comment')
+    inappSlaWarning = serializers.BooleanField(source='inapp_sla_warning')
+    inappSlaBreach = serializers.BooleanField(source='inapp_sla_breach')
+    inappSystem = serializers.BooleanField(source='inapp_system')
+    inappMention = serializers.BooleanField(source='inapp_mention')
+    
+    class Meta:
+        model = NotificationPreference
+        fields = [
+            'emailTicketCreated', 'emailTicketAssigned', 'emailTicketStatusChanged',
+            'emailTicketComment', 'emailSlaWarning', 'emailSlaBreach', 'emailSystem', 'emailMention',
+            'inappTicketCreated', 'inappTicketAssigned', 'inappTicketStatusChanged',
+            'inappTicketComment', 'inappSlaWarning', 'inappSlaBreach', 'inappSystem', 'inappMention'
+        ]
