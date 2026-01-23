@@ -33,6 +33,12 @@ from accounts.permissions import IsStaffMember, IsAdminOrManager
 from accounts.models import User
 from accounts.response_wrapper import success_response, error_response, APIResponse
 from accounts.pagination import CustomPagination
+from accounts.notifications import (
+    notify_ticket_created,
+    notify_ticket_assigned,
+    notify_ticket_status_changed,
+    notify_new_comment,
+)
 
 
 def _get_user_display_name(user):
@@ -61,8 +67,20 @@ class TicketListCreateView(ListCreateAPIView):
 
     def get_queryset(self):
         qs = Ticket.objects.all().order_by("-created_at")
-        # 非 staff 只能看自己的
-        if not _is_staff(self.request.user):
+        
+        # Check if requesting only own tickets (for My Tickets page)
+        my_only = self.request.query_params.get('my')
+        # Check if requesting assigned tickets (for staff's assigned tickets page)
+        assigned_only = self.request.query_params.get('assigned')
+        
+        if my_only == 'true':
+            # Only return tickets created by current user
+            qs = qs.filter(requester_id=str(self.request.user.id))
+        elif assigned_only == 'true':
+            # Only return tickets assigned to current user (for staff)
+            qs = qs.filter(assignee_id=str(self.request.user.id))
+        elif not _is_staff(self.request.user):
+            # Non-staff users can only see their own tickets
             qs = qs.filter(requester_id=str(self.request.user.id))
         
         # Support status filter
@@ -115,6 +133,14 @@ class TicketListCreateView(ListCreateAPIView):
         self.perform_create(create_serializer)
 
         ticket = create_serializer.instance
+        
+        # Send notification for new ticket
+        try:
+            notify_ticket_created(ticket, request.user)
+        except Exception as e:
+            # Log but don't fail the request
+            print(f"Notification error: {e}")
+        
         detail_data = TicketDetailSerializer(ticket, context={"request": request}).data
         return success_response(detail_data, message='Ticket created successfully')
 
@@ -255,7 +281,8 @@ class TicketAssignView(GenericAPIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 
-        ticket.assignee_id = data["assignee_id"]
+        assignee_id = data["assignee_id"]
+        ticket.assignee_id = assignee_id
         ticket.team_id = data.get("team_id")
 
         if ticket.status == "new":
@@ -263,6 +290,13 @@ class TicketAssignView(GenericAPIView):
 
         ticket.updated_at = timezone.now()
         ticket.save()
+
+        # Send notification to assignee
+        try:
+            assignee = User.objects.get(id=assignee_id)
+            notify_ticket_assigned(ticket, assignee, request.user)
+        except Exception as e:
+            print(f"Notification error: {e}")
 
         out = TicketDetailSerializer(ticket, context={"request": request}).data
         return success_response(out, message='Ticket assigned successfully')
@@ -301,6 +335,12 @@ class TicketStatusChangeView(GenericAPIView):
                 ticket.resolved_at = timezone.now()
             if new_status == "closed":
                 ticket.closed_at = timezone.now()
+            
+            # Send notification for status change
+            try:
+                notify_ticket_status_changed(ticket, old_status, new_status, request.user)
+            except Exception as e:
+                print(f"Notification error: {e}")
 
         ticket.updated_at = timezone.now()
         ticket.save()
@@ -333,6 +373,13 @@ class TicketCommentCreateView(GenericAPIView):
             author_email=getattr(request.user, "email", "") or "",
             created_at=timezone.now(),
         )
+
+        # Send notification for new comment (only for non-internal comments)
+        if not comment.is_internal:
+            try:
+                notify_new_comment(ticket, comment, request.user)
+            except Exception as e:
+                print(f"Notification error: {e}")
 
         out = TicketCommentSerializer(comment, context={"request": request}).data
         return success_response(out, message='Comment added')

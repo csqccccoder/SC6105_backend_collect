@@ -182,3 +182,104 @@ class AuditLog(models.Model):
     
     def __str__(self):
         return f"{self.user_email} - {self.action} - {self.timestamp}"
+
+
+class Notification(models.Model):
+    """Notification Model for in-app and email notifications"""
+    
+    class NotificationType(models.TextChoices):
+        TICKET_CREATED = 'ticket_created', 'Ticket Created'
+        TICKET_ASSIGNED = 'ticket_assigned', 'Ticket Assigned'
+        TICKET_STATUS_CHANGED = 'ticket_status_changed', 'Ticket Status Changed'
+        TICKET_COMMENT = 'ticket_comment', 'New Comment'
+        SLA_WARNING = 'sla_warning', 'SLA Warning'
+        SLA_BREACHED = 'sla_breached', 'SLA Breached'
+        SYSTEM = 'system', 'System Notification'
+        MENTION = 'mention', 'You were mentioned'
+    
+    recipient = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+        verbose_name='Recipient'
+    )
+    type = models.CharField(
+        'Type',
+        max_length=30,
+        choices=NotificationType.choices,
+        default=NotificationType.SYSTEM
+    )
+    title = models.CharField('Title', max_length=200)
+    message = models.TextField('Message')
+    
+    # Related object (optional) - for linking to ticket, etc.
+    related_object_type = models.CharField('Related Object Type', max_length=50, blank=True, null=True)
+    related_object_id = models.CharField('Related Object ID', max_length=100, blank=True, null=True)
+    
+    # Status
+    is_read = models.BooleanField('Is Read', default=False)
+    read_at = models.DateTimeField('Read At', null=True, blank=True)
+    
+    # Email notification
+    email_sent = models.BooleanField('Email Sent', default=False)
+    email_sent_at = models.DateTimeField('Email Sent At', null=True, blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField('Created At', auto_now_add=True)
+    
+    class Meta:
+        db_table = 'notifications'
+        verbose_name = 'Notification'
+        verbose_name_plural = 'Notifications'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['recipient', '-created_at']),
+            models.Index(fields=['recipient', 'is_read']),
+            models.Index(fields=['type']),
+        ]
+    
+    def __str__(self):
+        return f"{self.recipient.email} - {self.title}"
+    
+    def mark_as_read(self):
+        """Mark notification as read"""
+        if not self.is_read:
+            from django.utils import timezone
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save(update_fields=['is_read', 'read_at'])
+
+
+class NotificationPreference(models.Model):
+    """User notification preferences"""
+    
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='notification_preferences',
+        verbose_name='User'
+    )
+    
+    # Email preferences
+    email_ticket_created = models.BooleanField('Email on Ticket Created', default=True)
+    email_ticket_assigned = models.BooleanField('Email on Ticket Assigned', default=True)
+    email_ticket_status_changed = models.BooleanField('Email on Status Changed', default=True)
+    email_ticket_comment = models.BooleanField('Email on New Comment', default=True)
+    email_sla_warning = models.BooleanField('Email on SLA Warning', default=True)
+    email_system = models.BooleanField('Email System Notifications', default=False)
+    
+    # In-app preferences
+    inapp_ticket_created = models.BooleanField('In-App Ticket Created', default=True)
+    inapp_ticket_assigned = models.BooleanField('In-App Ticket Assigned', default=True)
+    inapp_ticket_status_changed = models.BooleanField('In-App Status Changed', default=True)
+    inapp_ticket_comment = models.BooleanField('In-App New Comment', default=True)
+    inapp_sla_warning = models.BooleanField('In-App SLA Warning', default=True)
+    inapp_system = models.BooleanField('In-App System Notifications', default=True)
+    
+    class Meta:
+        db_table = 'notification_preferences'
+        verbose_name = 'Notification Preference'
+        verbose_name_plural = 'Notification Preferences'
+    
+    def __str__(self):
+        return f"Preferences for {self.user.email}"

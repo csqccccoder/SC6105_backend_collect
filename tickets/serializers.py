@@ -32,11 +32,13 @@ class TicketListItemSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "title",
+            "description",
             "status",
             "priority",
             "category",
             "channel",
             "requester_id",
+            "requester_email",
             "requester_name",
             "assignee_id",
             "assignee_name",
